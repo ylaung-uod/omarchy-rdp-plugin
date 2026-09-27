@@ -176,6 +176,231 @@ HOME="$TMP/home" XDG_CONFIG_HOME="$TMP/home/.config" \
   exit 1
 }
 
+# Installation must fail closed rather than overwrite an unrelated command at
+# one of the plugin's fixed user-local paths.
+mkdir -p "$TMP/home-collision/.config/hypr-rdp" "$TMP/home-collision/.local/bin"
+printf 'certificate\n' >"$TMP/home-collision/.config/hypr-rdp/tls.crt"
+printf 'private-key\n' >"$TMP/home-collision/.config/hypr-rdp/tls.key"
+printf '#!/bin/bash\necho unrelated\n' >"$TMP/home-collision/.local/bin/omarchy-rdp-status"
+if HOME="$TMP/home-collision" XDG_CONFIG_HOME="$TMP/home-collision/.config" \
+    PATH="$TMP/install-bin:$PATH" "$ROOT/install.sh" --skip-password >/dev/null 2>&1; then
+  echo "installer overwrote or accepted an unrelated command" >&2
+  exit 1
+fi
+grep -q '^echo unrelated$' "$TMP/home-collision/.local/bin/omarchy-rdp-status" || {
+  echo "installer changed an unrelated command before aborting" >&2
+  exit 1
+}
+
+# Ownership records must not follow symlinks into unrelated user files.
+mkdir -p "$TMP/home-record/.config/hypr-rdp" \
+  "$TMP/home-record/.local/state/omarchy-rdp/installed-files"
+printf 'certificate\n' >"$TMP/home-record/.config/hypr-rdp/tls.crt"
+printf 'private-key\n' >"$TMP/home-record/.config/hypr-rdp/tls.key"
+printf 'do-not-change\n' >"$TMP/record-victim"
+printf 'io.github.ylaung-uod.omarchy-rdp\n' \
+  >"$TMP/home-record/.local/state/omarchy-rdp/installed-files/owner"
+ln -s "$TMP/record-victim" \
+  "$TMP/home-record/.local/state/omarchy-rdp/installed-files/omarchy-rdp-status.sha256"
+if HOME="$TMP/home-record" XDG_CONFIG_HOME="$TMP/home-record/.config" \
+    PATH="$TMP/install-bin:$PATH" "$ROOT/install.sh" --skip-password >/dev/null 2>&1; then
+  echo "installer accepted a symlinked ownership record" >&2
+  exit 1
+fi
+grep -q '^do-not-change$' "$TMP/record-victim" || {
+  echo "installer followed a symlinked ownership record" >&2
+  exit 1
+}
+
+# Installation must reject symlinked components in every destination directory.
+mkdir -p "$TMP/home-config-link" "$TMP/config-link-victim/hypr-rdp"
+printf 'certificate\n' >"$TMP/config-link-victim/hypr-rdp/tls.crt"
+printf 'private-key\n' >"$TMP/config-link-victim/hypr-rdp/tls.key"
+printf 'BIND="0.0.0.0:3389"\n' >"$TMP/config-link-victim/hypr-rdp/options"
+ln -s "$TMP/config-link-victim" "$TMP/home-config-link/config-link"
+if HOME="$TMP/home-config-link" XDG_CONFIG_HOME="$TMP/home-config-link/config-link" \
+    PATH="$TMP/install-bin:$PATH" "$ROOT/install.sh" --bind localhost --skip-password \
+    >/dev/null 2>&1; then
+  echo "installer accepted a symlinked configuration path component" >&2
+  exit 1
+fi
+grep -q '^BIND="0.0.0.0:3389"$' "$TMP/config-link-victim/hypr-rdp/options" || {
+  echo "installer modified a symlinked configuration target" >&2
+  exit 1
+}
+
+# Known configuration paths must be regular files; TLS generation must never
+# follow a symlink or overwrite a partial existing identity.
+mkdir -p "$TMP/home-config-file/.config/hypr-rdp"
+printf 'certificate-victim\n' >"$TMP/tls-certificate-victim"
+ln -s "$TMP/tls-certificate-victim" \
+  "$TMP/home-config-file/.config/hypr-rdp/tls.crt"
+if HOME="$TMP/home-config-file" XDG_CONFIG_HOME="$TMP/home-config-file/.config" \
+    PATH="$TMP/install-bin:$PATH" "$ROOT/install.sh" --skip-password >/dev/null 2>&1; then
+  echo "installer accepted a symlinked TLS configuration file" >&2
+  exit 1
+fi
+[[ -L $TMP/home-config-file/.config/hypr-rdp/tls.crt ]] \
+  && grep -q '^certificate-victim$' "$TMP/tls-certificate-victim" || {
+  echo "installer replaced or followed a symlinked TLS configuration file" >&2
+  exit 1
+}
+
+mkdir -p "$TMP/home-partial-tls/.config/hypr-rdp"
+printf 'certificate-only\n' >"$TMP/home-partial-tls/.config/hypr-rdp/tls.crt"
+if HOME="$TMP/home-partial-tls" XDG_CONFIG_HOME="$TMP/home-partial-tls/.config" \
+    PATH="$TMP/install-bin:$PATH" "$ROOT/install.sh" --skip-password >/dev/null 2>&1; then
+  echo "installer accepted an incomplete TLS identity" >&2
+  exit 1
+fi
+[[ ! -e $TMP/home-partial-tls/.local/bin/omarchy-rdp-server \
+  && ! -e $TMP/home-partial-tls/.local/state/omarchy-rdp \
+  && ! -e $TMP/home-partial-tls/.config/hypr-rdp/options ]] || {
+  echo "installer made changes before rejecting an incomplete TLS identity" >&2
+  exit 1
+}
+grep -q '^certificate-only$' "$TMP/home-partial-tls/.config/hypr-rdp/tls.crt" || {
+  echo "installer changed an incomplete TLS identity before aborting" >&2
+  exit 1
+}
+
+mkdir -p "$TMP/home-partial-key/.config/hypr-rdp"
+printf 'key-only\n' >"$TMP/home-partial-key/.config/hypr-rdp/tls.key"
+if HOME="$TMP/home-partial-key" XDG_CONFIG_HOME="$TMP/home-partial-key/.config" \
+    PATH="$TMP/install-bin:$PATH" "$ROOT/install.sh" --skip-password >/dev/null 2>&1; then
+  echo "installer accepted a TLS identity containing only a key" >&2
+  exit 1
+fi
+[[ ! -e $TMP/home-partial-key/.local/bin/omarchy-rdp-server \
+  && ! -e $TMP/home-partial-key/.local/state/omarchy-rdp \
+  && ! -e $TMP/home-partial-key/.config/hypr-rdp/options ]] || {
+  echo "installer made changes before rejecting a key-only TLS identity" >&2
+  exit 1
+}
+grep -q '^key-only$' "$TMP/home-partial-key/.config/hypr-rdp/tls.key" || {
+  echo "installer changed a key-only TLS identity before aborting" >&2
+  exit 1
+}
+
+# Uninstallation must preserve locally modified managed paths and preserve
+# configuration by default, including unrelated files in the config directory.
+mkdir -p "$TMP/home-uninstall/.config/hypr-rdp"
+printf 'certificate\n' >"$TMP/home-uninstall/.config/hypr-rdp/tls.crt"
+printf 'private-key\n' >"$TMP/home-uninstall/.config/hypr-rdp/tls.key"
+HOME="$TMP/home-uninstall" XDG_CONFIG_HOME="$TMP/home-uninstall/.config" \
+  PATH="$TMP/install-bin:$PATH" "$ROOT/install.sh" --skip-password >/dev/null
+printf '\n# local command change\n' >>"$TMP/home-uninstall/.local/bin/omarchy-rdp-status"
+printf '\n# local unit change\n' >>"$TMP/home-uninstall/.config/systemd/user/hypr-rdp.service"
+printf 'unrelated\n' >"$TMP/home-uninstall/.config/hypr-rdp/notes.txt"
+cat >"$TMP/install-bin/systemctl" <<'EOF'
+#!/bin/bash
+if [[ $* == *"is-active"* ]]; then
+  echo inactive
+  exit 3
+fi
+exit 0
+EOF
+HOME="$TMP/home-uninstall" XDG_CONFIG_HOME="$TMP/home-uninstall/.config" \
+  XDG_RUNTIME_DIR="$TMP/runtime-uninstall" PATH="$TMP/install-bin:$PATH" \
+  "$ROOT/uninstall.sh" >/dev/null
+[[ -f $TMP/home-uninstall/.local/bin/omarchy-rdp-status ]] || {
+  echo "uninstaller removed a locally modified command" >&2
+  exit 1
+}
+[[ -f $TMP/home-uninstall/.config/systemd/user/hypr-rdp.service ]] || {
+  echo "uninstaller removed a locally modified service unit" >&2
+  exit 1
+}
+[[ -f $TMP/home-uninstall/.config/hypr-rdp/options \
+  && -f $TMP/home-uninstall/.config/hypr-rdp/notes.txt ]] || {
+  echo "uninstaller removed configuration without explicit consent" >&2
+  exit 1
+}
+[[ ! -e $TMP/home-uninstall/.local/bin/omarchy-rdp-server ]] || {
+  echo "uninstaller kept an unmodified managed command" >&2
+  exit 1
+}
+HOME="$TMP/home-uninstall" XDG_CONFIG_HOME="$TMP/home-uninstall/.config" \
+  XDG_RUNTIME_DIR="$TMP/runtime-uninstall" PATH="$TMP/install-bin:$PATH" \
+  "$ROOT/uninstall.sh" --remove-config >/dev/null
+[[ ! -e $TMP/home-uninstall/.config/hypr-rdp/options \
+  && ! -e $TMP/home-uninstall/.config/hypr-rdp/tls.crt \
+  && ! -e $TMP/home-uninstall/.config/hypr-rdp/tls.key ]] || {
+  echo "explicit config removal kept plugin configuration files" >&2
+  exit 1
+}
+[[ -f $TMP/home-uninstall/.config/hypr-rdp/notes.txt ]] || {
+  echo "explicit config removal deleted an unrelated file" >&2
+  exit 1
+}
+
+# Uninstallation must not follow configuration or runtime directory symlinks.
+mkdir -p "$TMP/home-symlink/.config" "$TMP/symlink-config-victim" \
+  "$TMP/runtime-symlink" "$TMP/symlink-runtime-victim" \
+  "$TMP/state-symlink" "$TMP/symlink-state-victim/installed-files"
+printf 'options-victim\n' >"$TMP/symlink-config-victim/options"
+printf 'certificate-victim\n' >"$TMP/symlink-config-victim/tls.crt"
+printf 'key-victim\n' >"$TMP/symlink-config-victim/tls.key"
+printf 'password-victim\n' >"$TMP/symlink-runtime-victim/password"
+printf 'record-victim\n' >"$TMP/symlink-state-victim/installed-files/omarchy-rdp-server.sha256"
+ln -s "$TMP/symlink-config-victim" "$TMP/home-symlink/.config/hypr-rdp"
+ln -s "$TMP/symlink-runtime-victim" "$TMP/runtime-symlink/hypr-rdp"
+ln -s "$TMP/symlink-state-victim" "$TMP/state-symlink/omarchy-rdp"
+HOME="$TMP/home-symlink" XDG_CONFIG_HOME="$TMP/home-symlink/.config" \
+  XDG_RUNTIME_DIR="$TMP/runtime-symlink" XDG_STATE_HOME="$TMP/state-symlink" \
+  PATH="$TMP/install-bin:$PATH" "$ROOT/uninstall.sh" --remove-config >/dev/null
+[[ -f $TMP/symlink-config-victim/options \
+  && -f $TMP/symlink-config-victim/tls.crt \
+  && -f $TMP/symlink-config-victim/tls.key \
+  && -f $TMP/symlink-runtime-victim/password \
+  && -f $TMP/symlink-state-victim/installed-files/omarchy-rdp-server.sha256 ]] || {
+  echo "uninstaller followed a configuration or runtime directory symlink" >&2
+  exit 1
+}
+
+mkdir -p "$TMP/home-ancestor-link" "$TMP/ancestor-config-victim/hypr-rdp" \
+  "$TMP/ancestor-runtime-victim/hypr-rdp"
+printf 'options-victim\n' >"$TMP/ancestor-config-victim/hypr-rdp/options"
+printf 'password-victim\n' >"$TMP/ancestor-runtime-victim/hypr-rdp/password"
+ln -s "$TMP/ancestor-config-victim" "$TMP/home-ancestor-link/config-root"
+ln -s "$TMP/ancestor-runtime-victim" "$TMP/home-ancestor-link/runtime-root"
+HOME="$TMP/home-ancestor-link" XDG_CONFIG_HOME="$TMP/home-ancestor-link/config-root" \
+  XDG_RUNTIME_DIR="$TMP/home-ancestor-link/runtime-root" PATH="$TMP/install-bin:$PATH" \
+  "$ROOT/uninstall.sh" --remove-config >/dev/null
+[[ -f $TMP/ancestor-config-victim/hypr-rdp/options \
+  && -f $TMP/ancestor-runtime-victim/hypr-rdp/password ]] || {
+  echo "uninstaller followed a symlinked configuration or runtime ancestor" >&2
+  exit 1
+}
+
+mkdir -p "$TMP/relative-cwd/relative-config/hypr-rdp" \
+  "$TMP/relative-cwd/relative-runtime/hypr-rdp"
+printf 'relative-options-victim\n' >"$TMP/relative-cwd/relative-config/hypr-rdp/options"
+printf 'relative-password-victim\n' >"$TMP/relative-cwd/relative-runtime/hypr-rdp/password"
+(
+  cd "$TMP/relative-cwd"
+  HOME="$TMP/home-ancestor-link" XDG_CONFIG_HOME=relative-config \
+    XDG_RUNTIME_DIR=relative-runtime PATH="$TMP/install-bin:$PATH" \
+    "$ROOT/uninstall.sh" --remove-config >/dev/null
+)
+[[ -f $TMP/relative-cwd/relative-config/hypr-rdp/options \
+  && -f $TMP/relative-cwd/relative-runtime/hypr-rdp/password ]] || {
+  echo "uninstaller accepted a relative XDG path" >&2
+  exit 1
+}
+
+mkdir -p "$TMP/home-unrelated-state" \
+  "$TMP/unrelated-state/omarchy-rdp/installed-files"
+printf 'unrelated-record\n' \
+  >"$TMP/unrelated-state/omarchy-rdp/installed-files/omarchy-rdp-server.sha256"
+HOME="$TMP/home-unrelated-state" XDG_CONFIG_HOME="$TMP/home-unrelated-state/.config" \
+  XDG_RUNTIME_DIR="$TMP/home-unrelated-state/runtime" XDG_STATE_HOME="$TMP/unrelated-state" \
+  PATH="$TMP/install-bin:$PATH" "$ROOT/uninstall.sh" >/dev/null
+[[ -f $TMP/unrelated-state/omarchy-rdp/installed-files/omarchy-rdp-server.sha256 ]] || {
+  echo "uninstaller deleted an ownership record without a plugin ownership marker" >&2
+  exit 1
+}
+
 grep -q 'READY=false' "$ROOT/scripts/omarchy-rdp-password"
 grep -q 'ss -ltnH "sport = :$PORT"' "$ROOT/scripts/omarchy-rdp-password"
 

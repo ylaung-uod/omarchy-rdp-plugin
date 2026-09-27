@@ -58,7 +58,7 @@ The setup:
 4. Installs and enables a systemd user service.
 5. Prompts for a separate RDP-only password.
 
-Existing TLS files are preserved. A plain reinstall also preserves the options file; an explicit `--bind localhost` or `--bind lan` updates only its `BIND` setting. The setup does not enable SSH, auto-login, router port forwarding, or firewall rules.
+Existing TLS files are preserved. A plain reinstall also preserves the options file; an explicit `--bind localhost` or `--bind lan` updates only its `BIND` setting. The installer refuses symlinked destination or configuration paths, incomplete TLS identities, and any existing helper command or service unit that is neither identical to the plugin source nor confirmed by its recorded checksum as an unmodified file previously installed by this plugin. The setup does not enable SSH, auto-login, router port forwarding, or firewall rules.
 
 ## Password and reboot behaviour
 
@@ -145,11 +145,13 @@ cd ~/.config/omarchy/plugins/io.github.ylaung-uod.omarchy-rdp
 omarchy plugin remove io.github.ylaung-uod.omarchy-rdp
 ```
 
-Preserve configuration and the stable TLS fingerprint:
+Configuration and the stable TLS fingerprint are preserved by default. To remove the plugin's known configuration files explicitly:
 
 ```bash
-./uninstall.sh --keep-config
+./uninstall.sh --remove-config
 ```
+
+The uninstaller preserves locally modified helper commands and service units. Even with `--remove-config`, unrelated files under `~/.config/hypr-rdp` are retained.
 
 Also remove the upstream package if no other setup uses it:
 
