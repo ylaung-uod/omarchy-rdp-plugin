@@ -16,7 +16,7 @@ Omarchy plugins are unsandboxed code. Review this repository before enabling it.
 
 ## Install the shell plugin
 
-Once the repository is available on GitHub (authorized access is required while it remains private):
+Install the plugin directly from its public GitHub repository:
 
 ```bash
 omarchy plugin add https://github.com/ylaung-uod/omarchy-rdp-plugin.git --enable
