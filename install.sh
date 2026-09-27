@@ -6,19 +6,24 @@ usage() {
 Usage: ./install.sh [--bind lan|localhost] [--skip-password]
 
 Install the runtime components for the Remote Desktop Omarchy plugin.
-  --bind localhost   Listen only on 127.0.0.1 (default; use an SSH tunnel)
-  --bind lan         Listen on all interfaces (trusted LAN/VPN only)
+  --bind localhost   Explicitly listen only on 127.0.0.1 (use an SSH tunnel)
+  --bind lan         Explicitly listen on all interfaces (trusted LAN/VPN only)
   --skip-password    Install without setting the RDP password
+
+Without --bind, a new installation defaults to localhost and a reinstall
+preserves the existing BIND setting.
 EOF
 }
 
 BIND_MODE=localhost
+BIND_EXPLICIT=false
 SET_PASSWORD=true
 while (( $# > 0 )); do
   case "$1" in
   --bind)
     (( $# >= 2 )) || { echo "--bind needs lan or localhost" >&2; exit 2; }
     BIND_MODE=$2
+    BIND_EXPLICIT=true
     shift 2
     ;;
   --skip-password) SET_PASSWORD=false; shift ;;
@@ -57,8 +62,20 @@ if [[ ! -e $CONF_DIR/options ]]; then
   if [[ $BIND_MODE == "lan" ]]; then
     sed -i 's/^BIND=.*/BIND="0.0.0.0:3389"/' "$CONF_DIR/options"
   fi
+elif $BIND_EXPLICIT; then
+  if [[ $BIND_MODE == "lan" ]]; then
+    BIND_VALUE="0.0.0.0:3389"
+  else
+    BIND_VALUE="127.0.0.1:3389"
+  fi
+  if grep -q '^BIND=' "$CONF_DIR/options"; then
+    sed -i "s/^BIND=.*/BIND=\"$BIND_VALUE\"/" "$CONF_DIR/options"
+  else
+    printf '\nBIND="%s"\n' "$BIND_VALUE" >>"$CONF_DIR/options"
+  fi
+  echo "Updated $CONF_DIR/options to $BIND_VALUE."
 else
-  echo "Keeping existing $CONF_DIR/options."
+  echo "Keeping existing $CONF_DIR/options; pass --bind to change it."
 fi
 
 if [[ ! -s $CONF_DIR/tls.crt || ! -s $CONF_DIR/tls.key ]]; then

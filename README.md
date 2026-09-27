@@ -37,7 +37,7 @@ omarchy plugin enable io.github.ylaung-uod.omarchy-rdp --section right
 
 ## Install the runtime
 
-From the installed plugin directory, use the safe localhost-only default:
+On a new installation, omitting `--bind` uses the safe localhost-only default:
 
 ```bash
 cd ~/.config/omarchy/plugins/io.github.ylaung-uod.omarchy-rdp
@@ -58,7 +58,7 @@ The setup:
 4. Installs and enables a systemd user service.
 5. Prompts for a separate RDP-only password.
 
-Existing options and TLS files are preserved. The setup does not enable SSH, auto-login, router port forwarding, or firewall rules.
+Existing TLS files are preserved. A plain reinstall also preserves the options file; an explicit `--bind localhost` or `--bind lan` updates only its `BIND` setting. The setup does not enable SSH, auto-login, router port forwarding, or firewall rules.
 
 ## Password and reboot behaviour
 
@@ -133,7 +133,7 @@ If the default capture method fails, add `--capture-mode ext` to the `OPTIONS` a
 omarchy plugin update io.github.ylaung-uod.omarchy-rdp
 ```
 
-If an update changes runtime scripts or the service unit, rerun `./install.sh` for localhost-only access or `./install.sh --bind lan` from the plugin directory.
+If an update changes runtime scripts or the service unit, rerun `./install.sh` to preserve the current network setting. Use `./install.sh --bind localhost` or `./install.sh --bind lan` to change an existing binding explicitly.
 
 ## Uninstall
 

@@ -116,6 +116,66 @@ jq -e '.active == true and .serviceKnown == true' <<<"$STATUS_JSON" >/dev/null |
   exit 1
 }
 
+# An explicit --bind selection must update an existing options file. A plain
+# reinstall may preserve it, but the command-line choice cannot be ignored.
+mkdir -p "$TMP/home/.config/hypr-rdp" "$TMP/install-bin"
+printf 'certificate\n' >"$TMP/home/.config/hypr-rdp/tls.crt"
+printf 'private-key\n' >"$TMP/home/.config/hypr-rdp/tls.key"
+printf 'BIND="0.0.0.0:3389"\nOPTIONS=()\n' >"$TMP/home/.config/hypr-rdp/options"
+cat >"$TMP/install-bin/omarchy-version" <<'EOF'
+#!/bin/bash
+echo 4.0.4
+EOF
+cat >"$TMP/install-bin/omarchy-pkg-add" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+cat >"$TMP/install-bin/systemctl" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+chmod 0755 "$TMP/install-bin/"*
+
+mkdir -p "$TMP/home-new/.config/hypr-rdp"
+printf 'certificate\n' >"$TMP/home-new/.config/hypr-rdp/tls.crt"
+printf 'private-key\n' >"$TMP/home-new/.config/hypr-rdp/tls.key"
+HOME="$TMP/home-new" XDG_CONFIG_HOME="$TMP/home-new/.config" \
+  PATH="$TMP/install-bin:$PATH" "$ROOT/install.sh" --skip-password >/dev/null
+grep -q '^BIND="127.0.0.1:3389"$' "$TMP/home-new/.config/hypr-rdp/options" || {
+  echo "new installation did not default to localhost" >&2
+  exit 1
+}
+
+HOME="$TMP/home" XDG_CONFIG_HOME="$TMP/home/.config" \
+  PATH="$TMP/install-bin:$PATH" "$ROOT/install.sh" --bind localhost --skip-password >/dev/null
+grep -q '^BIND="127.0.0.1:3389"$' "$TMP/home/.config/hypr-rdp/options" || {
+  echo "explicit localhost bind did not update existing options" >&2
+  exit 1
+}
+HOME="$TMP/home" XDG_CONFIG_HOME="$TMP/home/.config" \
+  PATH="$TMP/install-bin:$PATH" "$ROOT/install.sh" --bind lan --skip-password >/dev/null
+grep -q '^BIND="0.0.0.0:3389"$' "$TMP/home/.config/hypr-rdp/options" || {
+  echo "explicit LAN bind did not update existing options" >&2
+  exit 1
+}
+OPTIONS_HASH_BEFORE=$(sha256sum "$TMP/home/.config/hypr-rdp/options" | cut -d' ' -f1)
+HOME="$TMP/home" XDG_CONFIG_HOME="$TMP/home/.config" \
+  PATH="$TMP/install-bin:$PATH" "$ROOT/install.sh" --skip-password >/dev/null
+OPTIONS_HASH_AFTER=$(sha256sum "$TMP/home/.config/hypr-rdp/options" | cut -d' ' -f1)
+[[ $OPTIONS_HASH_BEFORE == "$OPTIONS_HASH_AFTER" ]] || {
+  echo "plain reinstall modified the existing options file" >&2
+  exit 1
+}
+
+printf 'OPTIONS=()\n' >"$TMP/home/.config/hypr-rdp/options"
+HOME="$TMP/home" XDG_CONFIG_HOME="$TMP/home/.config" \
+  PATH="$TMP/install-bin:$PATH" "$ROOT/install.sh" --bind localhost --skip-password >/dev/null
+[[ $(grep -c '^BIND=' "$TMP/home/.config/hypr-rdp/options") == 1 ]] \
+  && grep -q '^BIND="127.0.0.1:3389"$' "$TMP/home/.config/hypr-rdp/options" || {
+  echo "explicit bind was not added to options without a BIND entry" >&2
+  exit 1
+}
+
 grep -q 'READY=false' "$ROOT/scripts/omarchy-rdp-password"
 grep -q 'ss -ltnH "sport = :$PORT"' "$ROOT/scripts/omarchy-rdp-password"
 
