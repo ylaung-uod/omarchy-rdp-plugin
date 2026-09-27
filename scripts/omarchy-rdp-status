@@ -1,0 +1,46 @@
+#!/bin/bash
+set -euo pipefail
+
+CONF_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/hypr-rdp
+RUN_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr-rdp
+BIND="127.0.0.1:3389"
+OPTIONS=()
+# shellcheck source=/dev/null
+[[ -r $CONF_DIR/options ]] && source "$CONF_DIR/options"
+
+installed=false
+configured=false
+armed=false
+active=false
+service_known=false
+listening=false
+command -v hypr-rdp >/dev/null && installed=true
+[[ -s $CONF_DIR/tls.crt && -s $CONF_DIR/tls.key ]] && configured=true
+[[ -s $RUN_DIR/password ]] && armed=true
+SERVICE_RC=0
+SERVICE_STATE=$(systemctl --user is-active hypr-rdp.service 2>/dev/null) || SERVICE_RC=$?
+case "$SERVICE_RC:$SERVICE_STATE" in
+*:active | *:activating | *:reloading | *:deactivating) active=true; service_known=true ;;
+3:inactive | 3:failed) service_known=true ;;
+esac
+PORT=${BIND##*:}
+ss -ltnH "sport = :$PORT" 2>/dev/null | grep -q . && listening=true
+
+if [[ $BIND == 127.0.0.1:* || $BIND == localhost:* ]]; then
+  endpoint=$BIND
+else
+  ip=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([^ ]*\).*/\1/p' | head -n1)
+  [[ -n $ip ]] || ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  endpoint=${ip:-unknown}:${BIND##*:}
+fi
+
+jq -n \
+  --argjson installed "$installed" \
+  --argjson configured "$configured" \
+  --argjson armed "$armed" \
+  --argjson active "$active" \
+  --argjson serviceKnown "$service_known" \
+  --argjson listening "$listening" \
+  --arg bind "$BIND" \
+  --arg endpoint "$endpoint" \
+  '{installed:$installed, configured:$configured, armed:$armed, active:$active, serviceKnown:$serviceKnown, listening:$listening, bind:$bind, endpoint:$endpoint}'

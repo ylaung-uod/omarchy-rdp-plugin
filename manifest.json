@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.ylaung-uod.omarchy-rdp",
+  "name": "Remote Desktop",
+  "version": "0.1.0",
+  "author": "ylaung-uod",
+  "license": "MIT",
+  "description": "RDP status and controls for the current Omarchy Hyprland session, with reboot-safe in-memory credentials.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Remote Desktop",
+    "description": "View RDP status, start or re-arm access, and stop the server from the Omarchy bar.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

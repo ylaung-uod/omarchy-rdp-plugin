@@ -1,0 +1,18 @@
+# Sourced by ~/.local/bin/omarchy-rdp-server.
+# Safe default for an SSH tunnel or local VPN integration. Set 0.0.0.0:3389
+# explicitly only for a trusted LAN/VPN; never expose it to the internet.
+BIND="127.0.0.1:3389"
+
+OPTIONS=(
+  --h264-backend auto
+  --fps 30
+  --bitrate 8000000
+  --max-frames-in-flight 4
+)
+
+# Optional examples:
+#   --audio-mode off
+#   --capture-mode ext
+#   --resolution 1920x1080
+#   --scale 1.5
+#   --output HDMI-A-1

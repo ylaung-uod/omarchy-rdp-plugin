@@ -1,0 +1,23 @@
+[Unit]
+Description=Native RDP server for the Omarchy Hyprland session
+Documentation=https://github.com/MuNeNICK/hypr-rdp
+After=graphical-session.target
+PartOf=graphical-session.target
+ConditionPathExists=%t/hypr-rdp/password
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/omarchy-rdp-server
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=graphical-session.target

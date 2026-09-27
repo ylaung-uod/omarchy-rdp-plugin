@@ -1,0 +1,29 @@
+#!/bin/bash
+set -euo pipefail
+
+CONF_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/hypr-rdp
+RUN_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr-rdp
+
+for file in "$CONF_DIR/tls.crt" "$CONF_DIR/tls.key" "$RUN_DIR/password"; do
+  [[ -r $file ]] || {
+    printf 'hypr-rdp: %s is missing; run omarchy-rdp-password\n' "$file" >&2
+    exit 1
+  }
+done
+
+BIND="127.0.0.1:3389"
+OPTIONS=()
+# shellcheck source=/dev/null
+[[ -r $CONF_DIR/options ]] && source "$CONF_DIR/options"
+[[ -n ${WAYLAND_DISPLAY:-} ]] || {
+  echo "hypr-rdp: WAYLAND_DISPLAY is unset; start it from the Omarchy graphical session" >&2
+  exit 1
+}
+
+exec hypr-rdp \
+  --bind "$BIND" \
+  --cert "$CONF_DIR/tls.crt" \
+  --key "$CONF_DIR/tls.key" \
+  --username "$(id -un)" \
+  --password-file "$RUN_DIR/password" \
+  "${OPTIONS[@]}"

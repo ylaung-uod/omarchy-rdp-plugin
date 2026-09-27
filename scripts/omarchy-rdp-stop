@@ -1,0 +1,25 @@
+#!/bin/bash
+set -euo pipefail
+RUN_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr-rdp
+
+service_state() {
+  local state rc=0
+  state=$(systemctl --user is-active hypr-rdp.service 2>&1) || rc=$?
+  case "$rc:$state" in
+  *:active | *:activating | *:reloading | *:deactivating) echo active ;;
+  3:inactive | 3:failed) echo inactive ;;
+  *) printf 'Unable to determine Remote Desktop service state: %s\n' "$state" >&2; return 1 ;;
+  esac
+}
+
+STATE=$(service_state) || exit 1
+if [[ $STATE == active ]]; then
+  systemctl --user stop hypr-rdp.service
+fi
+STATE=$(service_state) || exit 1
+if [[ $STATE != inactive ]]; then
+  echo "Remote desktop is still running; the credential has not been removed." >&2
+  exit 1
+fi
+rm -f "$RUN_DIR/password"
+echo "Remote desktop stopped and disarmed until a password is entered again."
