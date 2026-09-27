@@ -151,7 +151,7 @@ Configuration and the stable TLS fingerprint are preserved by default. To remove
 ./uninstall.sh --remove-config
 ```
 
-The uninstaller preserves locally modified helper commands and service units. Even with `--remove-config`, unrelated files under `~/.config/hypr-rdp` are retained.
+The uninstaller removes helper commands and the service unit only when the plugin ownership marker and recorded checksum both confirm the file is unchanged. Files without valid plugin ownership state are preserved even when they are byte-identical to bundled files. For a runtime installed before ownership tracking was introduced, rerun `./install.sh --skip-password` once before uninstalling. Even with `--remove-config`, unrelated files under `~/.config/hypr-rdp` are retained.
 
 Also remove the upstream package if no other setup uses it:
 

@@ -27,7 +27,6 @@ while (( $# > 0 )); do
 done
 [[ $EUID -ne 0 ]] || { echo "Run this as the Omarchy desktop user, not root." >&2; exit 2; }
 
-ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PLUGIN_ID=io.github.ylaung-uod.omarchy-rdp
 CONF_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/hypr-rdp
 UNIT=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/hypr-rdp.service
@@ -50,36 +49,55 @@ has_symlink_component() {
   return 1
 }
 
+owner_marker_valid() {
+  local marker_size expected_size=$(( ${#PLUGIN_ID} + 1 ))
+  [[ ! -L $OWNER_MARKER && -f $OWNER_MARKER ]] || return 1
+  marker_size=$(wc -c <"$OWNER_MARKER")
+  [[ $marker_size == "$expected_size" ]] || return 1
+  cmp -s "$OWNER_MARKER" <(printf '%s\n' "$PLUGIN_ID")
+}
+
 OWNERSHIP_SAFE=false
 if ! has_symlink_component "$STATE_DIR" \
   && ! has_symlink_component "$OWNERSHIP_DIR" \
-  && [[ ! -L $OWNER_MARKER && -f $OWNER_MARKER ]] \
-  && [[ $(<"$OWNER_MARKER") == "$PLUGIN_ID" ]]; then
+  && owner_marker_valid; then
   OWNERSHIP_SAFE=true
 elif [[ -e $OWNERSHIP_DIR || -L $OWNERSHIP_DIR ]]; then
   echo "Ignoring unverified plugin state path; no ownership records will be read or removed."
 fi
 
+owned_record_checksum() {
+  local key=$1 expected record record_size
+  local -a record_lines
+  record=$OWNERSHIP_DIR/$key.sha256
+  $OWNERSHIP_SAFE || return 1
+  [[ ! -L $record && -f $record ]] || return 1
+  record_size=$(wc -c <"$record")
+  [[ $record_size == 65 ]] || return 1
+  mapfile -t record_lines <"$record"
+  (( ${#record_lines[@]} == 1 )) || return 1
+  expected=${record_lines[0]}
+  [[ $expected =~ ^[[:xdigit:]]{64}$ ]] || return 1
+  cmp -s "$record" <(printf '%s\n' "$expected") || return 1
+  printf '%s\n' "$expected"
+}
+
 managed_file_unchanged() {
-  local source=$1 target=$2 key=$3 expected actual
+  local target=$1 key=$2 expected actual
   ! has_symlink_component "$target" || return 1
   [[ ! -L $target && -f $target ]] || return 1
-  if $OWNERSHIP_SAFE && [[ -f $OWNERSHIP_DIR/$key.sha256 && ! -L $OWNERSHIP_DIR/$key.sha256 ]]; then
-    read -r expected <"$OWNERSHIP_DIR/$key.sha256"
-    actual=$(sha256sum "$target" | cut -d' ' -f1)
-    [[ $actual == "$expected" ]]
-  else
-    cmp -s "$source" "$target"
-  fi
+  expected=$(owned_record_checksum "$key") || return 1
+  actual=$(sha256sum "$target" | cut -d' ' -f1)
+  [[ $actual == "$expected" ]]
 }
 
 remove_managed_file() {
-  local source=$1 target=$2 key=$3
+  local target=$1 key=$2
   if [[ ! -e $target && ! -L $target ]]; then
     if $OWNERSHIP_SAFE && [[ ! -L $OWNERSHIP_DIR/$key.sha256 ]]; then
       rm -f "$OWNERSHIP_DIR/$key.sha256"
     fi
-  elif managed_file_unchanged "$source" "$target" "$key"; then
+  elif managed_file_unchanged "$target" "$key"; then
     rm -f "$target"
     if $OWNERSHIP_SAFE && [[ ! -L $OWNERSHIP_DIR/$key.sha256 ]]; then
       rm -f "$OWNERSHIP_DIR/$key.sha256"
@@ -100,11 +118,8 @@ service_state() {
 }
 
 UNIT_MANAGED=false
-if ! has_symlink_component "$UNIT"; then
-  if [[ ! -e $UNIT && ! -L $UNIT ]] \
-    || managed_file_unchanged "$ROOT/systemd/hypr-rdp.service" "$UNIT" hypr-rdp.service; then
-    UNIT_MANAGED=true
-  fi
+if ! has_symlink_component "$UNIT" && managed_file_unchanged "$UNIT" hypr-rdp.service; then
+  UNIT_MANAGED=true
 fi
 
 STATE=$(service_state) || exit 1
@@ -122,16 +137,16 @@ if [[ $STATE != inactive ]]; then
 fi
 if $UNIT_MANAGED; then
   systemctl --user disable hypr-rdp.service 2>/dev/null || true
-  remove_managed_file "$ROOT/systemd/hypr-rdp.service" "$UNIT" hypr-rdp.service
+  remove_managed_file "$UNIT" hypr-rdp.service
   systemctl --user daemon-reload
   systemctl --user reset-failed hypr-rdp.service 2>/dev/null || true
 else
   echo "Keeping $UNIT because it is not an unmodified unit installed by this plugin."
 fi
-remove_managed_file "$ROOT/scripts/omarchy-rdp-server" "$HOME/.local/bin/omarchy-rdp-server" omarchy-rdp-server
-remove_managed_file "$ROOT/scripts/omarchy-rdp-password" "$HOME/.local/bin/omarchy-rdp-password" omarchy-rdp-password
-remove_managed_file "$ROOT/scripts/omarchy-rdp-status" "$HOME/.local/bin/omarchy-rdp-status" omarchy-rdp-status
-remove_managed_file "$ROOT/scripts/omarchy-rdp-stop" "$HOME/.local/bin/omarchy-rdp-stop" omarchy-rdp-stop
+remove_managed_file "$HOME/.local/bin/omarchy-rdp-server" omarchy-rdp-server
+remove_managed_file "$HOME/.local/bin/omarchy-rdp-password" omarchy-rdp-password
+remove_managed_file "$HOME/.local/bin/omarchy-rdp-status" omarchy-rdp-status
+remove_managed_file "$HOME/.local/bin/omarchy-rdp-stop" omarchy-rdp-stop
 if has_symlink_component "$RUN_DIR"; then
   echo "Keeping relative or symlinked runtime path: $RUN_DIR."
 elif [[ -d $RUN_DIR ]]; then

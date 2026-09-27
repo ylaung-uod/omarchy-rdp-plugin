@@ -52,13 +52,29 @@ STATE_DIR=${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-rdp
 OWNERSHIP_DIR=$STATE_DIR/installed-files
 OWNER_MARKER=$OWNERSHIP_DIR/owner
 
+ownership_record_checksum() {
+  local record=$1 expected record_size
+  local -a record_lines
+  [[ ! -L $record && -f $record ]] || return 1
+  record_size=$(wc -c <"$record")
+  [[ $record_size == 65 ]] || return 1
+  mapfile -t record_lines <"$record"
+  (( ${#record_lines[@]} == 1 )) || return 1
+  expected=${record_lines[0]}
+  [[ $expected =~ ^[[:xdigit:]]{64}$ ]] || return 1
+  cmp -s "$record" <(printf '%s\n' "$expected") || return 1
+  printf '%s\n' "$expected"
+}
+
 check_managed_target() {
-  local source=$1 target=$2 key=$3 expected actual record
+  local source=$1 target=$2 key=$3 expected= actual record
   record=$OWNERSHIP_DIR/$key.sha256
-  [[ ! -L $record ]] || {
-    echo "Refusing to use symlinked ownership record at $record." >&2
-    return 1
-  }
+  if [[ -e $record || -L $record ]]; then
+    expected=$(ownership_record_checksum "$record") || {
+      echo "Refusing to use invalid ownership record at $record." >&2
+      return 1
+    }
+  fi
   [[ ! -L $target ]] || {
     echo "Refusing to replace symlink at $target." >&2
     return 1
@@ -69,8 +85,7 @@ check_managed_target() {
     return 1
   }
   cmp -s "$source" "$target" && return 0
-  if [[ -f $record ]]; then
-    read -r expected <"$record"
+  if [[ -n $expected ]]; then
     actual=$(sha256sum "$target" | cut -d' ' -f1)
     [[ $actual == "$expected" ]] && return 0
   fi
@@ -103,6 +118,14 @@ has_symlink_component() {
   return 1
 }
 
+owner_marker_valid() {
+  local marker_size expected_size=$(( ${#PLUGIN_ID} + 1 ))
+  [[ ! -L $OWNER_MARKER && -f $OWNER_MARKER ]] || return 1
+  marker_size=$(wc -c <"$OWNER_MARKER")
+  [[ $marker_size == "$expected_size" ]] || return 1
+  cmp -s "$OWNER_MARKER" <(printf '%s\n' "$PLUGIN_ID")
+}
+
 for destination_dir in "$BIN_DIR" "$CONF_DIR" "$UNIT_DIR" "$STATE_DIR" "$OWNERSHIP_DIR"; do
   ! has_symlink_component "$destination_dir" || {
     echo "Refusing to use relative or symlinked destination path: $destination_dir." >&2
@@ -115,12 +138,8 @@ for destination_dir in "$BIN_DIR" "$CONF_DIR" "$UNIT_DIR" "$STATE_DIR" "$OWNERSH
 done
 
 if [[ -e $OWNER_MARKER || -L $OWNER_MARKER ]]; then
-  [[ ! -L $OWNER_MARKER && -f $OWNER_MARKER ]] || {
+  owner_marker_valid || {
     echo "Refusing to use invalid ownership marker at $OWNER_MARKER." >&2
-    exit 1
-  }
-  [[ $(<"$OWNER_MARKER") == "$PLUGIN_ID" ]] || {
-    echo "Refusing to use ownership directory claimed by another source: $OWNERSHIP_DIR." >&2
     exit 1
   }
 elif [[ -d $OWNERSHIP_DIR ]]; then

@@ -212,6 +212,30 @@ grep -q '^do-not-change$' "$TMP/record-victim" || {
   exit 1
 }
 
+mkdir -p "$TMP/home-malformed-record/.config/hypr-rdp" \
+  "$TMP/home-malformed-record/.local/bin" \
+  "$TMP/home-malformed-record/.local/state/omarchy-rdp/installed-files"
+printf 'certificate\n' >"$TMP/home-malformed-record/.config/hypr-rdp/tls.crt"
+printf 'private-key\n' >"$TMP/home-malformed-record/.config/hypr-rdp/tls.key"
+printf 'io.github.ylaung-uod.omarchy-rdp\n' \
+  >"$TMP/home-malformed-record/.local/state/omarchy-rdp/installed-files/owner"
+printf '#!/bin/bash\necho unrelated-malformed\n' \
+  >"$TMP/home-malformed-record/.local/bin/omarchy-rdp-status"
+malformed_install_checksum=$(sha256sum \
+  "$TMP/home-malformed-record/.local/bin/omarchy-rdp-status" | cut -d' ' -f1)
+printf '%s\nTRAILING-GARBAGE\n' "$malformed_install_checksum" \
+  >"$TMP/home-malformed-record/.local/state/omarchy-rdp/installed-files/omarchy-rdp-status.sha256"
+if HOME="$TMP/home-malformed-record" XDG_CONFIG_HOME="$TMP/home-malformed-record/.config" \
+    PATH="$TMP/install-bin:$PATH" "$ROOT/install.sh" --skip-password >/dev/null 2>&1; then
+  echo "installer accepted a malformed ownership record" >&2
+  exit 1
+fi
+grep -q '^echo unrelated-malformed$' \
+  "$TMP/home-malformed-record/.local/bin/omarchy-rdp-status" || {
+  echo "installer trusted a malformed record and overwrote an unrelated command" >&2
+  exit 1
+}
+
 # Installation must reject symlinked components in every destination directory.
 mkdir -p "$TMP/home-config-link" "$TMP/config-link-victim/hypr-rdp"
 printf 'certificate\n' >"$TMP/config-link-victim/hypr-rdp/tls.crt"
@@ -279,6 +303,137 @@ fi
 }
 grep -q '^key-only$' "$TMP/home-partial-key/.config/hypr-rdp/tls.key" || {
   echo "installer changed a key-only TLS identity before aborting" >&2
+  exit 1
+}
+
+# Source-identical files are not owned without valid plugin state. An uninstall
+# must preserve independently installed helpers and units instead of adopting
+# them based only on byte equality.
+mkdir -p "$TMP/home-unowned/.local/bin" \
+  "$TMP/home-unowned/.config/systemd/user" \
+  "$TMP/home-unowned/.local/state/omarchy-rdp/installed-files"
+printf 'io.github.ylaung-uod.omarchy-rdp\n' \
+  >"$TMP/home-unowned/.local/state/omarchy-rdp/installed-files/owner"
+install -m0755 "$ROOT/scripts/omarchy-rdp-server" \
+  "$TMP/home-unowned/.local/bin/omarchy-rdp-server"
+install -m0755 "$ROOT/scripts/omarchy-rdp-password" \
+  "$TMP/home-unowned/.local/bin/omarchy-rdp-password"
+install -m0755 "$ROOT/scripts/omarchy-rdp-status" \
+  "$TMP/home-unowned/.local/bin/omarchy-rdp-status"
+install -m0755 "$ROOT/scripts/omarchy-rdp-stop" \
+  "$TMP/home-unowned/.local/bin/omarchy-rdp-stop"
+install -m0644 "$ROOT/systemd/hypr-rdp.service" \
+  "$TMP/home-unowned/.config/systemd/user/hypr-rdp.service"
+cat >"$TMP/install-bin/systemctl" <<'EOF'
+#!/bin/bash
+if [[ -n ${TEST_SYSTEMCTL_LOG:-} ]]; then
+  printf '%s\n' "$*" >>"$TEST_SYSTEMCTL_LOG"
+fi
+if [[ $* == *"is-active"* ]]; then
+  echo inactive
+  exit 3
+fi
+exit 0
+EOF
+TEST_SYSTEMCTL_LOG="$TMP/unowned-systemctl.log" HOME="$TMP/home-unowned" \
+  XDG_CONFIG_HOME="$TMP/home-unowned/.config" XDG_RUNTIME_DIR="$TMP/unowned-runtime" \
+  PATH="$TMP/install-bin:$PATH" "$ROOT/uninstall.sh" >/dev/null
+for unowned_path in \
+  "$TMP/home-unowned/.local/bin/omarchy-rdp-server" \
+  "$TMP/home-unowned/.local/bin/omarchy-rdp-password" \
+  "$TMP/home-unowned/.local/bin/omarchy-rdp-status" \
+  "$TMP/home-unowned/.local/bin/omarchy-rdp-stop" \
+  "$TMP/home-unowned/.config/systemd/user/hypr-rdp.service"; do
+  [[ -f $unowned_path ]] || {
+    echo "uninstaller removed a source-identical file without valid plugin ownership state" >&2
+    exit 1
+  }
+done
+if grep -qE '(^| )stop( |$)|(^| )disable( |$)' "$TMP/unowned-systemctl.log"; then
+  echo "uninstaller changed service state without valid plugin ownership state" >&2
+  exit 1
+fi
+
+# A checksum record must contain exactly one valid checksum line. Malformed
+# records fail closed and preserve the corresponding managed file.
+mkdir -p "$TMP/home-malformed/.config/hypr-rdp"
+printf 'certificate\n' >"$TMP/home-malformed/.config/hypr-rdp/tls.crt"
+printf 'private-key\n' >"$TMP/home-malformed/.config/hypr-rdp/tls.key"
+HOME="$TMP/home-malformed" XDG_CONFIG_HOME="$TMP/home-malformed/.config" \
+  PATH="$TMP/install-bin:$PATH" "$ROOT/install.sh" --skip-password >/dev/null
+printf 'TRAILING-GARBAGE\n' \
+  >>"$TMP/home-malformed/.local/state/omarchy-rdp/installed-files/omarchy-rdp-status.sha256"
+HOME="$TMP/home-malformed" XDG_CONFIG_HOME="$TMP/home-malformed/.config" \
+  XDG_RUNTIME_DIR="$TMP/malformed-runtime" PATH="$TMP/install-bin:$PATH" \
+  "$ROOT/uninstall.sh" >/dev/null
+[[ -f $TMP/home-malformed/.local/bin/omarchy-rdp-status ]] || {
+  echo "uninstaller trusted a malformed checksum record" >&2
+  exit 1
+}
+status_checksum=$(sha256sum "$TMP/home-malformed/.local/bin/omarchy-rdp-status" | cut -d' ' -f1)
+printf '%s\0' "$status_checksum" \
+  >"$TMP/home-malformed/.local/state/omarchy-rdp/installed-files/omarchy-rdp-status.sha256"
+HOME="$TMP/home-malformed" XDG_CONFIG_HOME="$TMP/home-malformed/.config" \
+  XDG_RUNTIME_DIR="$TMP/malformed-runtime" PATH="$TMP/install-bin:$PATH" \
+  "$ROOT/uninstall.sh" >/dev/null
+[[ -f $TMP/home-malformed/.local/bin/omarchy-rdp-status ]] || {
+  echo "uninstaller trusted a NUL-containing checksum record" >&2
+  exit 1
+}
+[[ ! -e $TMP/home-malformed/.local/bin/omarchy-rdp-server ]] || {
+  echo "uninstaller failed to remove a file with a valid ownership record" >&2
+  exit 1
+}
+
+mkdir -p "$TMP/home-nul-owner/.local/bin" \
+  "$TMP/home-nul-owner/.local/state/omarchy-rdp/installed-files"
+install -m0755 "$ROOT/scripts/omarchy-rdp-server" \
+  "$TMP/home-nul-owner/.local/bin/omarchy-rdp-server"
+nul_owner_checksum=$(sha256sum "$TMP/home-nul-owner/.local/bin/omarchy-rdp-server" | cut -d' ' -f1)
+printf '%s\n' "$nul_owner_checksum" \
+  >"$TMP/home-nul-owner/.local/state/omarchy-rdp/installed-files/omarchy-rdp-server.sha256"
+printf 'io.github.ylaung-uod.omarchy-rdp\0' \
+  >"$TMP/home-nul-owner/.local/state/omarchy-rdp/installed-files/owner"
+HOME="$TMP/home-nul-owner" XDG_CONFIG_HOME="$TMP/home-nul-owner/.config" \
+  XDG_RUNTIME_DIR="$TMP/nul-owner-runtime" PATH="$TMP/install-bin:$PATH" \
+  "$ROOT/uninstall.sh" >/dev/null 2>&1
+[[ -f $TMP/home-nul-owner/.local/bin/omarchy-rdp-server ]] || {
+  echo "uninstaller trusted a NUL-containing ownership marker" >&2
+  exit 1
+}
+
+# A historical unit checksum is not enough to manage an active service when
+# the unit path itself is missing; another unit with the same name may be loaded.
+mkdir -p "$TMP/home-missing-unit/.config/hypr-rdp"
+printf 'certificate\n' >"$TMP/home-missing-unit/.config/hypr-rdp/tls.crt"
+printf 'private-key\n' >"$TMP/home-missing-unit/.config/hypr-rdp/tls.key"
+HOME="$TMP/home-missing-unit" XDG_CONFIG_HOME="$TMP/home-missing-unit/.config" \
+  PATH="$TMP/install-bin:$PATH" "$ROOT/install.sh" --skip-password >/dev/null
+rm -f "$TMP/home-missing-unit/.config/systemd/user/hypr-rdp.service"
+cat >"$TMP/install-bin/systemctl" <<'EOF'
+#!/bin/bash
+if [[ -n ${TEST_SYSTEMCTL_LOG:-} ]]; then
+  printf '%s\n' "$*" >>"$TEST_SYSTEMCTL_LOG"
+fi
+if [[ $* == *"is-active"* ]]; then
+  echo active
+  exit 0
+fi
+exit 0
+EOF
+if TEST_SYSTEMCTL_LOG="$TMP/missing-unit-systemctl.log" HOME="$TMP/home-missing-unit" \
+    XDG_CONFIG_HOME="$TMP/home-missing-unit/.config" \
+    XDG_RUNTIME_DIR="$TMP/missing-unit-runtime" PATH="$TMP/install-bin:$PATH" \
+    "$ROOT/uninstall.sh" >/dev/null 2>&1; then
+  echo "uninstaller accepted an active service whose unit path was missing" >&2
+  exit 1
+fi
+if grep -qE '(^| )stop( |$)|(^| )disable( |$)' "$TMP/missing-unit-systemctl.log"; then
+  echo "uninstaller changed a service using only a historical unit checksum" >&2
+  exit 1
+fi
+[[ -f $TMP/home-missing-unit/.local/bin/omarchy-rdp-server ]] || {
+  echo "uninstaller removed helpers after rejecting a missing active unit" >&2
   exit 1
 }
 
